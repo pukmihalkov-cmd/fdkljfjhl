@@ -1,136 +1,67 @@
+"""
+Quote Generator — Генератор случайных цитат
+Автор: Николай Сорокин
+Описание: GUI-приложение для генерации случайных цитат с фильтрацией по автору и теме,
+         сохранением истории и возможностью экспорта в JSON.
+"""
+
 import tkinter as tk
 from tkinter import ttk, messagebox
-import requests
 import json
+import random
 import os
 from datetime import datetime
 
-# ---------- Класс конвертера валют ----------
-class CurrencyConverter:
+# ---------- БАЗА ДАННЫХ ЦИТАТ ----------
+QUOTES_DB = [
+    {"text": "Будь изменением, которое хочешь увидеть в мире.", "author": "Махатма Ганди", "theme": "мотивация"},
+    {"text": "Жизнь — это то, что с тобой происходит, пока ты строишь планы.", "author": "Джон Леннон", "theme": "жизнь"},
+    {"text": "Не важно, как медленно ты идёшь, главное — не останавливаться.", "author": "Конфуций", "theme": "мотивация"},
+    {"text": "Единственный способ делать великую работу — любить то, что ты делаешь.", "author": "Стив Джобс", "theme": "работа"},
+    {"text": "Успех — это способность идти от неудачи к неудаче, не теряя энтузиазма.", "author": "Уинстон Черчилль", "theme": "успех"},
+    {"text": "Будущее зависит от того, что ты делаешь сегодня.", "author": "Махатма Ганди", "theme": "мотивация"},
+    {"text": "Лучший способ предсказать будущее — создать его.", "author": "Питер Друкер", "theme": "будущее"},
+    {"text": "Знание — сила.", "author": "Фрэнсис Бэкон", "theme": "знание"},
+    {"text": "Без труда не вытащишь и рыбку из пруда.", "author": "Народная", "theme": "мотивация"},
+    {"text": "Всё гениальное — просто.", "author": "Леонардо да Винчи", "theme": "мудрость"},
+    {"text": "Жизнь — как езда на велосипеде. Чтобы сохранить равновесие, нужно двигаться.", "author": "Альберт Эйнштейн", "theme": "жизнь"},
+    {"text": "Никогда не поздно стать тем, кем ты мог бы быть.", "author": "Джордж Элиот", "theme": "мотивация"},
+    {"text": "Мечтай так, будто жить вечно. Живи так, будто умрёшь сегодня.", "author": "Джеймс Дин", "theme": "жизнь"},
+    {"text": "То, что нас не убивает, делает нас сильнее.", "author": "Фридрих Ницше", "theme": "сила"},
+    {"text": "Делай, что можешь, с тем, что имеешь, там, где ты есть.", "author": "Теодор Рузвельт", "theme": "действие"},
+    {"text": "Нет никаких границ. Нужно только мужество и страсть.", "author": "Ричард Брэнсон", "theme": "успех"},
+    {"text": "Книги — корабли мысли.", "author": "Фрэнсис Бэкон", "theme": "знание"},
+    {"text": "Сложнее всего начать действовать, остальное зависит от упорства.", "author": "Пабло Пикассо", "theme": "действие"},
+    {"text": "Секрет успеха — начать.", "author": "Марк Твен", "theme": "успех"},
+    {"text": "Важно не количество знаний, а качество их.", "author": "Лев Толстой", "theme": "знание"},
+]
+
+# Имена авторов (для фильтра)
+AUTHORS = sorted(set(q["author"] for q in QUOTES_DB))
+# Темы (для фильтра)
+THEMES = sorted(set(q["theme"] for q in QUOTES_DB))
+
+
+# ---------- ОСНОВНОЙ КЛАСС ПРИЛОЖЕНИЯ ----------
+class QuoteGenerator:
     def __init__(self, root):
         self.root = root
-        self.root.title("Currency Converter")
-        self.root.geometry("750x550")
-        self.root.resizable(False, False)
+        self.root.title("Генератор цитат")
+        self.root.geometry("900x650")
+        self.root.resizable(True, True)
 
-        # API настройки (бесплатный API exchangerate-api.com)
-        self.api_url = "https://api.exchangerate-api.com/v4/latest/"
-
-        # Данные валют и курсов
-        self.currencies = []
-        self.exchange_rates = {}
+        # История сгенерированных цитат
         self.history = []
-
-        # Загрузка истории из файла
+        self.filtered_history = []
         self.load_history()
 
         # Создание интерфейса
         self.create_widgets()
 
-        # Загрузка доступных валют
-        self.fetch_currencies()
-
-    # ---------- Внешнее API ----------
-    def fetch_currencies(self):
-        """Получение списка доступных валют и курсов"""
-        try:
-            response = requests.get(self.api_url + "USD", timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            self.exchange_rates = data["rates"]
-            self.currencies = sorted(self.exchange_rates.keys())
-
-            # Обновление выпадающих списков
-            self.from_currency_combo['values'] = self.currencies
-            self.to_currency_combo['values'] = self.currencies
-
-            # Установка значений по умолчанию
-            if "USD" in self.currencies:
-                self.from_currency_combo.set("USD")
-            if "EUR" in self.currencies:
-                self.to_currency_combo.set("EUR")
-
-            self.status_label.config(text="Курсы валют успешно загружены", foreground="green")
-        except requests.exceptions.RequestException as e:
-            self.status_label.config(text=f"Ошибка API: {e}", foreground="red")
-            messagebox.showerror("Ошибка", f"Не удалось загрузить курсы валют.\n{e}")
-
-    def convert_currency(self):
-        """Конвертация суммы из одной валюты в другую"""
-        # Проверка корректности ввода суммы
-        amount_str = self.amount_entry.get().strip()
-        if not amount_str:
-            messagebox.showwarning("Внимание", "Введите сумму для конвертации")
-            return
-
-        try:
-            amount = float(amount_str)
-            if amount <= 0:
-                messagebox.showwarning("Внимание", "Сумма должна быть положительным числом")
-                return
-        except ValueError:
-            messagebox.showwarning("Внимание", "Сумма должна быть числом")
-            return
-
-        from_currency = self.from_currency_combo.get()
-        to_currency = self.to_currency_combo.get()
-
-        if not from_currency or not to_currency:
-            messagebox.showwarning("Внимание", "Выберите валюты")
-            return
-
-        # Проверка наличия курсов
-        if not self.exchange_rates:
-            messagebox.showwarning("Внимание", "Курсы валют не загружены")
-            self.fetch_currencies()
-            return
-
-        try:
-            # Конвертация через USD как базовую валюту
-            if from_currency == "USD":
-                rate_from = 1
-            else:
-                rate_from = self.exchange_rates.get(from_currency, 0)
-
-            if to_currency == "USD":
-                rate_to = 1
-            else:
-                rate_to = self.exchange_rates.get(to_currency, 0)
-
-            if rate_from == 0 or rate_to == 0:
-                messagebox.showerror("Ошибка", "Курс для выбранной валюты не найден")
-                return
-
-            # Итоговая сумма
-            usd_amount = amount / rate_from
-            converted_amount = usd_amount * rate_to
-
-            # Форматирование результата
-            result_text = f"{amount:.2f} {from_currency} = {converted_amount:.2f} {to_currency}"
-            self.result_label.config(text=result_text)
-
-            # Добавление в историю
-            history_entry = {
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "from_currency": from_currency,
-                "to_currency": to_currency,
-                "amount": amount,
-                "converted_amount": round(converted_amount, 2),
-                "rate": round(rate_to / rate_from, 4)
-            }
-            self.history.insert(0, history_entry)  # Новые записи сверху
-            self.update_history_table()
-            self.save_history()
-
-            self.status_label.config(text="Конвертация выполнена", foreground="green")
-        except Exception as e:
-            self.status_label.config(text=f"Ошибка конвертации: {e}", foreground="red")
-            messagebox.showerror("Ошибка", f"Ошибка при конвертации:\n{e}")
-
-    # ---------- История (JSON) ----------
+    # ---------- ЗАГРУЗКА/СОХРАНЕНИЕ ИСТОРИИ (JSON) ----------
     def load_history(self):
-        """Загрузка истории из JSON файла"""
-        history_file = "conversion_history.json"
+        """Загрузка истории из файла JSON"""
+        history_file = "quotes_history.json"
         if os.path.exists(history_file):
             try:
                 with open(history_file, "r", encoding="utf-8") as f:
@@ -142,104 +73,209 @@ class CurrencyConverter:
             self.history = []
 
     def save_history(self):
-        """Сохранение истории в JSON файл"""
+        """Сохранение истории в файл JSON"""
         try:
-            with open("conversion_history.json", "w", encoding="utf-8") as f:
+            with open("quotes_history.json", "w", encoding="utf-8") as f:
                 json.dump(self.history, f, ensure_ascii=False, indent=4)
         except IOError as e:
             print(f"Ошибка сохранения истории: {e}")
 
-    def update_history_table(self):
-        """Обновление таблицы истории"""
+    def update_history_display(self):
+        """Обновление отображения истории (с учётом фильтрации)"""
         # Очистка таблицы
         for row in self.history_tree.get_children():
             self.history_tree.delete(row)
 
+        # Определяем, какие записи показывать
+        display_list = self.filtered_history if self.filtered_history else self.history
+
         # Добавление записей
-        for entry in self.history:
+        for entry in display_list:
             self.history_tree.insert("", "end", values=(
                 entry["timestamp"],
-                f"{entry['amount']} {entry['from_currency']}",
-                f"{entry['converted_amount']} {entry['to_currency']}",
-                entry["rate"]
+                entry["text"],
+                entry["author"],
+                entry["theme"]
             ))
 
+        self.status_label.config(text=f"Показано {len(display_list)} из {len(self.history)} цитат")
+
+    def add_to_history(self, quote):
+        """Добавление цитаты в историю"""
+        history_entry = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "text": quote["text"],
+            "author": quote["author"],
+            "theme": quote["theme"]
+        }
+        self.history.insert(0, history_entry)  # Новая цитата сверху
+        self.save_history()
+        self.update_history_display()
+        self.update_stats()
+
     def clear_history(self):
-        """Очистка истории"""
-        if messagebox.askyesno("Подтверждение", "Очистить всю историю конвертаций?"):
+        """Очистка всей истории"""
+        if messagebox.askyesno("Подтверждение", "Вы уверены, что хотите очистить всю историю?"):
             self.history = []
-            self.update_history_table()
             self.save_history()
-            self.status_label.config(text="История очищена", foreground="blue")
+            self.filtered_history = []
+            self.update_history_display()
+            self.update_stats()
+            self.status_label.config(text="История очищена")
 
-    # ---------- GUI ----------
+    def update_stats(self):
+        """Обновление статистики (всего цитат, уникальных авторов)"""
+        if not self.history:
+            self.stats_label.config(text="Статистика: нет данных")
+            return
+
+        total = len(self.history)
+        unique_authors = len(set(q["author"] for q in self.history))
+        self.stats_label.config(text=f"Статистика: всего цитат: {total} | разных авторов: {unique_authors}")
+
+    # ---------- ФИЛЬТРАЦИЯ ----------
+    def apply_filter(self):
+        """Применение фильтра по автору и теме"""
+        selected_author = self.filter_author_combo.get()
+        selected_theme = self.filter_theme_combo.get()
+
+        if selected_author == "Все" and selected_theme == "Все":
+            # Показать всю историю
+            self.filtered_history = []
+            self.update_history_display()
+            return
+
+        # Фильтрация
+        filtered = []
+        for entry in self.history:
+            author_match = (selected_author == "Все" or entry["author"] == selected_author)
+            theme_match = (selected_theme == "Все" or entry["theme"] == selected_theme)
+            if author_match and theme_match:
+                filtered.append(entry)
+
+        self.filtered_history = filtered
+        self.update_history_display()
+
+        if len(filtered) == 0:
+            self.status_label.config(text="По вашему запросу ничего не найдено", foreground="orange")
+        else:
+            self.status_label.config(text=f"Найдено {len(filtered)} цитат", foreground="green")
+
+    def reset_filter(self):
+        """Сброс фильтров"""
+        self.filter_author_combo.set("Все")
+        self.filter_theme_combo.set("Все")
+        self.filtered_history = []
+        self.update_history_display()
+
+    # ---------- ГЕНЕРАЦИЯ СЛУЧАЙНОЙ ЦИТАТЫ ----------
+    def generate_quote(self):
+        """Генерация случайной цитаты"""
+        quote = random.choice(QUOTES_DB)
+        self.display_quote(quote)
+        self.add_to_history(quote)
+        self.status_label.config(text="Новая цитата сгенерирована!", foreground="green")
+
+    def display_quote(self, quote):
+        """Отображение цитаты на экране"""
+        self.quote_text_label.config(text=f"«{quote['text']}»")
+        self.quote_author_label.config(text=f"— {quote['author']}")
+        self.quote_theme_label.config(text=f"Тема: {quote['theme']}")
+
+    # ---------- GUI (ИНТЕРФЕЙС) ----------
     def create_widgets(self):
-        # Основной фрейм
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        # Создание двух основных фреймов
+        left_frame = ttk.Frame(self.root, padding="10")
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # --- Блок ввода ---
-        ttk.Label(main_frame, text="Конвертер валют", font=("Arial", 16, "bold")).grid(row=0, column=0, columnspan=4, pady=10)
+        right_frame = ttk.Frame(self.root, padding="10")
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # Сумма
-        ttk.Label(main_frame, text="Сумма:").grid(row=1, column=0, sticky=tk.W, pady=5)
-        self.amount_entry = ttk.Entry(main_frame, width=15, font=("Arial", 12))
-        self.amount_entry.grid(row=1, column=1, sticky=tk.W, pady=5)
-        self.amount_entry.insert(0, "1.00")
+        # ========== ЛЕВАЯ ЧАСТЬ ==========
+        # Заголовок
+        ttk.Label(left_frame, text="Генератор цитат", font=("Arial", 18, "bold")).pack(pady=10)
 
-        # Из валюты
-        ttk.Label(main_frame, text="Из валюты:").grid(row=2, column=0, sticky=tk.W, pady=5)
-        self.from_currency_combo = ttk.Combobox(main_frame, width=10, values=[], state="readonly")
-        self.from_currency_combo.grid(row=2, column=1, sticky=tk.W, pady=5)
+        # Карточка цитаты
+        quote_frame = ttk.Frame(left_frame, relief=tk.RAISED, borderwidth=2)
+        quote_frame.pack(fill=tk.BOTH, expand=True, pady=10)
 
-        # В валюту
-        ttk.Label(main_frame, text="В валюту:").grid(row=3, column=0, sticky=tk.W, pady=5)
-        self.to_currency_combo = ttk.Combobox(main_frame, width=10, values=[], state="readonly")
-        self.to_currency_combo.grid(row=3, column=1, sticky=tk.W, pady=5)
+        self.quote_text_label = ttk.Label(quote_frame, text="Нажмите кнопку для генерации цитаты",
+                                          font=("Arial", 14, "italic"), wraplength=350, justify=tk.CENTER)
+        self.quote_text_label.pack(pady=30, padx=20)
 
-        # Кнопка конвертации
-        self.convert_btn = ttk.Button(main_frame, text="Конвертировать", command=self.convert_currency)
-        self.convert_btn.grid(row=4, column=0, columnspan=2, pady=15)
+        self.quote_author_label = ttk.Label(quote_frame, text="", font=("Arial", 12))
+        self.quote_author_label.pack(pady=5)
 
-        # Результат
-        self.result_label = ttk.Label(main_frame, text="", font=("Arial", 12, "bold"), foreground="blue")
-        self.result_label.grid(row=5, column=0, columnspan=2, pady=5)
+        self.quote_theme_label = ttk.Label(quote_frame, text="", font=("Arial", 10), foreground="gray")
+        self.quote_theme_label.pack(pady=5)
 
-        # Статус
-        self.status_label = ttk.Label(main_frame, text="Готово", foreground="gray")
-        self.status_label.grid(row=6, column=0, columnspan=2, pady=5)
+        # Кнопка генерации
+        self.generate_btn = ttk.Button(left_frame, text="Сгенерировать цитату", command=self.generate_quote)
+        self.generate_btn.pack(pady=20)
 
-        # --- Блок истории ---
-        history_frame = ttk.LabelFrame(self.root, text="История конвертаций", padding="5")
-        history_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=10, pady=10)
+        # ========== ПРАВАЯ ЧАСТЬ ==========
+        # Фильтры
+        filter_frame = ttk.LabelFrame(right_frame, text="Фильтрация истории", padding="10")
+        filter_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(filter_frame, text="Автор:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        self.filter_author_combo = ttk.Combobox(filter_frame, values=["Все"] + AUTHORS, state="readonly", width=20)
+        self.filter_author_combo.set("Все")
+        self.filter_author_combo.grid(row=0, column=1, padx=5, pady=5)
+
+        ttk.Label(filter_frame, text="Тема:").grid(row=1, column=0, sticky=tk.W, padx=5)
+        self.filter_theme_combo = ttk.Combobox(filter_frame, values=["Все"] + THEMES, state="readonly", width=20)
+        self.filter_theme_combo.set("Все")
+        self.filter_theme_combo.grid(row=1, column=1, padx=5, pady=5)
+
+        btn_frame = ttk.Frame(filter_frame)
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=10)
+
+        ttk.Button(btn_frame, text="Применить фильтр", command=self.apply_filter).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Сбросить", command=self.reset_filter).pack(side=tk.LEFT, padx=5)
 
         # Таблица истории
-        columns = ("Время", "От", "Результат", "Курс")
-        self.history_tree = ttk.Treeview(history_frame, columns=columns, show="headings", height=20)
+        history_frame = ttk.LabelFrame(right_frame, text="История цитат", padding="5")
+        history_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+        columns = ("Время", "Цитата", "Автор", "Тема")
+        self.history_tree = ttk.Treeview(history_frame, columns=columns, show="headings", height=15)
         self.history_tree.heading("Время", text="Время")
-        self.history_tree.heading("От", text="От")
-        self.history_tree.heading("Результат", text="Результат")
-        self.history_tree.heading("Курс", text="Курс")
-        self.history_tree.column("Время", width=140)
-        self.history_tree.column("От", width=100)
-        self.history_tree.column("Результат", width=120)
-        self.history_tree.column("Курс", width=80)
+        self.history_tree.heading("Цитата", text="Цитата")
+        self.history_tree.heading("Автор", text="Автор")
+        self.history_tree.heading("Тема", text="Тема")
+
+        self.history_tree.column("Время", width=130)
+        self.history_tree.column("Цитата", width=300)
+        self.history_tree.column("Автор", width=120)
+        self.history_tree.column("Тема", width=100)
 
         scrollbar = ttk.Scrollbar(history_frame, orient=tk.VERTICAL, command=self.history_tree.yview)
         self.history_tree.configure(yscrollcommand=scrollbar.set)
-        self.history_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.history_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Кнопка очистки истории
-        clear_btn = ttk.Button(history_frame, text="Очистить историю", command=self.clear_history)
-        clear_btn.grid(row=1, column=0, pady=10)
+        # Кнопки управления историей
+        control_frame = ttk.Frame(right_frame)
+        control_frame.pack(fill=tk.X, pady=5)
 
-        # Заполнение таблицы
-        self.update_history_table()
+        ttk.Button(control_frame, text="Очистить историю", command=self.clear_history).pack(side=tk.LEFT, padx=5)
+
+        # Статусная строка
+        self.status_label = ttk.Label(right_frame, text="Готово", foreground="gray")
+        self.status_label.pack(fill=tk.X, pady=5)
+
+        # Статистика
+        self.stats_label = ttk.Label(right_frame, text="Статистика: нет данных", font=("Arial", 9))
+        self.stats_label.pack(fill=tk.X, pady=2)
+
+        # Обновление статистики
+        self.update_history_display()
+        self.update_stats()
 
 
-# ---------- Запуск приложения ----------
+# ---------- ЗАПУСК ПРИЛОЖЕНИЯ ----------
 if __name__ == "__main__":
     root = tk.Tk()
-    app = CurrencyConverter(root)
+    app = QuoteGenerator(root)
     root.mainloop()
